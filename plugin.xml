@@ -66,6 +66,7 @@
         <header-file src="src/ios/AFNetworking/AFURLSessionManager.h" />
         <source-file src="src/ios/AFNetworking/AFURLSessionManager.m" />
 
+        <framework src="SystemConfiguration.framework" />
         <framework src="Security.framework" />
         <framework src="SystemConfiguration.framework" />
     </platform>
