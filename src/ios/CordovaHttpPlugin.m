@@ -1,5 +1,4 @@
 #import "CordovaHttpPlugin.h"
-// #import "CDVFile.h"
 #import "TextResponseSerializer.h"
 #import "HttpManager.h"
 
@@ -56,7 +55,6 @@
     } else {
         [HttpManager sharedClient].securityPolicy = [AFSecurityPolicy policyWithPinningMode:AFSSLPinningModeNone];
     }
-
     CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
     [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
 }
@@ -74,28 +72,67 @@
 - (void)post:(CDVInvokedUrlCommand*)command {
    HttpManager *manager = [HttpManager sharedClient];
    NSString *url = [command.arguments objectAtIndex:0];
-   NSDictionary *parameters = [command.arguments objectAtIndex:1];
+   NSString *data = [command.arguments objectAtIndex:1];
    NSDictionary *headers = [command.arguments objectAtIndex:2];
    [self setRequestHeaders: headers];
 
    CordovaHttpPlugin* __weak weakSelf = self;
-   manager.responseSerializer = [TextResponseSerializer serializer];
-   [manager POST:url parameters:parameters success:^(AFHTTPRequestOperation *operation, id responseObject) {
+    id accept = [headers objectForKey:@"Accept"];
+    if (!accept) {
+        accept = @"text/plain";
+    }
+    NSString *acceptString = (NSString*)accept;
+    if ([acceptString containsString:@"json"]) {
+        AFJSONResponseSerializer *jsonSerializer = [AFJSONResponseSerializer serializer];
+        jsonSerializer.readingOptions = NSJSONReadingAllowFragments;
+        manager.responseSerializer = jsonSerializer;
+    }
+    else if ([acceptString containsString:@"xml"]) {
+        manager.responseSerializer = [AFXMLParserResponseSerializer serializer];
+    }
+    else {
+        manager.responseSerializer = [TextResponseSerializer serializer];
+    }
+
+    NSMutableURLRequest *request = [manager.requestSerializer requestWithMethod:@"POST" URLString:url parameters:nil error:nil];
+
+    request.HTTPBody = [data dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSArray *cookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage]
+                        cookiesForURL:[NSURL URLWithString:url]];
+    NSDictionary *cookiesDictionary = [NSHTTPCookie requestHeaderFieldsWithCookies:cookies];
+    if (cookiesDictionary) {
+        [request setAllHTTPHeaderFields:cookiesDictionary];
+    }
+
+    AFHTTPRequestOperation *operation = [manager HTTPRequestOperationWithRequest:request
+        success:^(AFHTTPRequestOperation *operation, id responseObject) {
       NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
-      [dictionary setObject:[NSNumber numberWithInt:operation.response.statusCode] forKey:@"status"];
+      [dictionary setObject:[NSNumber numberWithInteger:operation.response.statusCode] forKey:@"status"];
       [dictionary setObject:responseObject forKey:@"data"];
       CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:dictionary];
       [weakSelf.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-      NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
-      [dictionary setObject:[NSNumber numberWithInt:operation.response.statusCode] forKey:@"status"];
-      [dictionary setObject:[error localizedDescription] forKey:@"error"];
-      CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:dictionary];
+      NSMutableDictionary *resultDictionary = [NSMutableDictionary dictionary];
+       NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse*)operation.response;
+       if ([httpResponse respondsToSelector:@selector(allHeaderFields)]) {
+           NSDictionary *headerDictionary = [httpResponse allHeaderFields];
+           NSLog(@"Error Headers %@", [headerDictionary description]);
+           [resultDictionary setObject:headerDictionary forKey:@"headers"];
+       }
+      NSLog(@"Error Text %@", operation.responseString);
+      [resultDictionary setObject:operation.responseString forKey:@"text"];
+      [resultDictionary setObject:[NSNumber numberWithInteger:operation.response.statusCode] forKey:@"status"];
+      [resultDictionary setObject:[error localizedDescription] forKey:@"error"];
+      CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:resultDictionary];
       [weakSelf.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
    }];
+
+    [manager.operationQueue addOperation:operation];
 }
 
 - (void)get:(CDVInvokedUrlCommand*)command {
+
    HttpManager *manager = [HttpManager sharedClient];
    NSString *url = [command.arguments objectAtIndex:0];
    NSDictionary *parameters = [command.arguments objectAtIndex:1];
@@ -106,7 +143,7 @@
         parameters = nil;
     }
 
-   CordovaHttpPlugin* __weak weakSelf = self;
+    CordovaHttpPlugin* __weak weakSelf = self;
 
     id accept = [headers objectForKey:@"Accept"];
     if (!accept) {
@@ -132,38 +169,38 @@
         [request setAllHTTPHeaderFields:cookiesDictionary];
     }
 
-    AFHTTPRequestOperation *operation = [manager HTTPRequestOperationWithRequest:
-         request
+    AFHTTPRequestOperation *operation = [manager HTTPRequestOperationWithRequest:request
          success:^(AFHTTPRequestOperation *operation, id responseObject) {
              NSMutableDictionary *resultDictionary = [NSMutableDictionary dictionary];
-
              NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse*)operation.response;
              if ([httpResponse respondsToSelector:@selector(allHeaderFields)]) {
                  NSDictionary *headerDictionary = [httpResponse allHeaderFields];
-                 NSLog([headerDictionary description]);
+                 //NSLog(@"Response Headers %@", [headerDictionary description]);
                  [resultDictionary setObject:headerDictionary forKey:@"headers"];
              }
-             [resultDictionary setObject:[NSNumber numberWithInt:operation.response.statusCode] forKey:@"status"];
+             [resultDictionary setObject:[NSNumber numberWithInteger:operation.response.statusCode] forKey:@"status"];
              [resultDictionary setObject:responseObject forKey:@"data"];
 
              CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:resultDictionary];
              [weakSelf.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
-         }
+        }
         failure:^(AFHTTPRequestOperation *operation, NSError *error) {
                 NSMutableDictionary *resultDictionary = [NSMutableDictionary dictionary];
                      NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse*)operation.response;
                      if ([httpResponse respondsToSelector:@selector(allHeaderFields)]) {
                          NSDictionary *headerDictionary = [httpResponse allHeaderFields];
-                         NSLog([headerDictionary description]);
+                         NSLog(@"Error Headers %@", [headerDictionary description]);
                          [resultDictionary setObject:headerDictionary forKey:@"headers"];
                      }
+                     NSLog(@"Error Text %@", operation.responseString);
                      //operation.responseString
                      [resultDictionary setValue:operation.responseString forKey:@"text"];
-                     [resultDictionary setObject:[NSNumber numberWithInt:operation.response.statusCode] forKey:@"status"];
+                     [resultDictionary setObject:[NSNumber numberWithInteger:operation.response.statusCode] forKey:@"status"];
                      [resultDictionary setObject:[error localizedDescription] forKey:@"error"];
                      CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsDictionary:resultDictionary];
                      [weakSelf.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
-                 }];
+        }
+    ];
 
     [manager.operationQueue addOperation:operation];
 }
